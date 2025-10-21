@@ -4,95 +4,132 @@ namespace App\Http\Controllers;
 
 use App\Models\Supplier;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class SupplierController extends Controller
 {
     public function index()
     {
-        return Supplier::all();
+        return Supplier::orderBy('company_name')->get();
     }
 
     public function show($id)
     {
-        // FIX: Eager-load the 'invoices' relationship along with ingredients
-        $supplier = Supplier::with(['ingredients', 'invoices'])->findOrFail($id);
-
-        // Manually construct the detailed response the frontend expects
-        $response = [
-            // Include all original supplier attributes
-            'id' => $supplier->id,
-            'company_name' => $supplier->company_name,
-            'ingredients' => $supplier->ingredients,
-
-            // Mock the performance data as before
-            'performance' => [
-                'overall_rating' => 4.8,
-                'total_orders' => 24,
-                'on_time_delivery' => 96,
-                'quality_rating' => 4.9,
-            ],
-            // Mock the financial data as before
-            'financials' => [
-                'monthly_spend' => 2840.50,
-                'last_order_date' => '2025-08-05',
-                'supplier_type' => 'Premium',
-            ],
-
-            // --- DYNAMIC ORDER HISTORY IS HERE ---
-            // Map over the REAL invoices to create the order history array.
-            'order_history' => $supplier->invoices->map(function ($invoice) {
-                return [
-                    'id' => $invoice->invoice_number, // Use invoice_number as the Order ID
-                    'date' => $invoice->invoice_date,
-                    'items' => rand(2, 10), // Mock item count since it's not on the invoice model
-                    'status' => ucfirst($invoice->status), // Capitalize status for display
-                    'total' => $invoice->total,
-                ];
-            }),
-        ];
-
-        return response()->json($response);
+        return Supplier::with(['ingredients', 'invoices'])->findOrFail($id);
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'company_name' => 'required|string|max:255',
-            'email_address' => 'required|email|unique:suppliers,email_address',
-            'abn' => 'nullable|string|max:20|unique:suppliers,abn',
-            'primary_contact_person' => 'required|string',
-            'phone_number' => 'required|string',
-            'street_address' => 'nullable|string',
-            'city' => 'nullable|string',
-            'state' => 'nullable|string',
-            'postcode' => 'nullable|string',
-            'entity_type' => 'nullable|string',
-            'entity_status' => 'nullable|string',
+            'company_name' => 'required|string|max:255|unique:suppliers',
+            'primary_contact_person' => 'required|string|max:255',
+            'email_address' => 'required|email|max:255',
+            'phone_number' => 'required|string|max:50',
+            'abn' => 'nullable|string|max:20',
+            'street_address' => 'nullable|string|max:255',
+            'city' => 'nullable|string|max:100',
+            'state' => 'nullable|string|max:50',
+            'postcode' => 'nullable|string|max:20',
+            'entity_type' => 'nullable|string|max:255',
+            'entity_status' => 'nullable|string|max:100',
             'product_categories' => 'nullable|array',
         ]);
 
         $supplier = Supplier::create($validated);
+
         return response()->json($supplier, 201);
     }
+
+    /**
+     * Handles the ABN lookup request from the frontend.
+     */
     public function abnLookup(Request $request)
     {
-        $request->validate(['abn' => 'required|string']);
-        $abn = preg_replace('/[\s-]+/', '', $request->input('abn'));
+        $validated = $request->validate(['abn' => 'required|string']);
+        $abn = preg_replace('/\s+/', '', $validated['abn']);
+        $guid = env('ABN_LOOKUP_GUID');
 
-        $abnData = [
-            '12345678901' => ['business_name' => 'Sydney Fresh Foods Pty Ltd', 'entity_type' => 'Australian Private Company', 'status' => 'Active', 'address' => '45 Market Street, Sydney, NSW 2000'],
-            '98765432109' => ['business_name' => 'Melbourne Coffee Roasters', 'entity_type' => 'Australian Public Company', 'status' => 'Active', 'address' => '101 Collins Street, Melbourne, VIC 3000'],
-            '55555555555' => ['business_name' => 'Inactive Business', 'entity_type' => 'Sole Trader', 'status' => 'Cancelled', 'address' => '123 Fake Street, Adelaide, SA 5000']
-        ];
-
-        if (array_key_exists($abn, $abnData)) {
-            $data = $abnData[$abn];
-            if ($data['status'] !== 'Active') {
-                return response()->json(['message' => "This business is inactive (Status: {$data['status']})."], 404);
-            }
-            return response()->json($data);
+        if (!$guid) {
+            Log::error('ABN Lookup GUID is not configured in .env file.');
+            return response()->json(['message' => 'ABN Lookup service is not configured.'], 500);
         }
 
-        return response()->json(['message' => 'No business found with this ABN. You can still continue by entering details manually.'], 404);
+        $apiUrl = "https://abr.business.gov.au/json/AbnDetails.aspx";
+
+        try {
+            $response = Http::timeout(10)->get($apiUrl, [
+                'abn' => $abn,
+                'guid' => $guid,
+                'callback' => 'jsonpCallback'
+            ]);
+
+            if ($response->failed()) {
+                return response()->json(['message' => 'Could not connect to the ABN Lookup service.'], 503);
+            }
+
+            $responseBody = $response->body();
+            if (!preg_match('/^jsonpCallback\((.*)\)$/s', $responseBody, $matches)) {
+                throw new \Exception('Invalid JSONP response format from ABN service.');
+            }
+            $jsonString = $matches[1];
+            $data = json_decode($jsonString, true);
+
+            if (isset($data['Message']) && !empty($data['Message'])) {
+                return response()->json(['message' => $data['Message']], 404);
+            }
+
+            if ($data === null) {
+                throw new \Exception('Failed to decode JSON from ABN service response.');
+            }
+
+            // --- NEW: Smart Address Parsing Logic ---
+            $addressComponents = [
+                'street_address' => '',
+                'city' => '',
+                'state' => '',
+                'postcode' => ''
+            ];
+            $formattedAddress = 'N/A';
+
+            // Case 1: Full physical address is available
+            if (isset($data['MainBusinessPhysicalAddress']['StateCode'])) {
+                $physicalAddress = $data['MainBusinessPhysicalAddress'];
+                $addressComponents['street_address'] = trim($physicalAddress['AddressLine1'] ?? '');
+                $addressComponents['city'] = trim($physicalAddress['Suburb'] ?? '');
+                $addressComponents['state'] = trim($physicalAddress['StateCode'] ?? '');
+                $addressComponents['postcode'] = trim($physicalAddress['Postcode'] ?? '');
+
+                $formattedAddress = implode(', ', array_filter([$addressComponents['street_address'], $addressComponents['city'], $addressComponents['state'] . ' ' . $addressComponents['postcode']]));
+            }
+            // Case 2: Only State and Postcode are available (like for Procal Dairies)
+            elseif (isset($data['AddressState']) && isset($data['AddressPostcode'])) {
+                $addressComponents['state'] = trim($data['AddressState']);
+                $addressComponents['postcode'] = trim($data['AddressPostcode']);
+                $formattedAddress = $addressComponents['state'] . ' ' . $addressComponents['postcode'];
+            }
+
+            $entityType = $data['EntityTypeName'] ?? 'N/A';
+
+            $formattedData = [
+                'business_name' => $data['EntityName'] ?? 'N/A',
+                'entity_type'   => $entityType,
+                'status'        => $data['AbnStatus'] ?? 'N/A',
+                'formatted_address' => $formattedAddress,      // For display on step 1
+                'address_components' => $addressComponents,   // For pre-filling step 3
+            ];
+
+            return response()->json($formattedData);
+        } catch (\Exception $e) {
+            Log::error('ABN Lookup Exception: ' . $e->getMessage());
+            return response()->json(['message' => 'An unexpected error occurred during ABN lookup.'], 500);
+        }
+    }
+
+    public function destroy($id)
+    {
+        $supplier = Supplier::findOrFail($id);
+        $supplier->delete();
+        return response()->json(null, 204);
     }
 }

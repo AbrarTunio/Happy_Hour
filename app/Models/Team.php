@@ -15,21 +15,25 @@ class Team extends Model
         'email',
         'phone_number',
         'date_of_birth',
+        'tax_file_number',
         'home_address',
+        'emergency_contact_name',
+        'emergency_contact_phone',
         'position',
+        'branch',
+        'department',
         'employment_type',
         'hourly_rate',
         'start_date',
-        'branch',
+        'staff_code',
+        'status', // <-- ADDED
         'schedule',
-        // 'permissions',
-        // 'kpis'
     ];
 
     protected $casts = [
         'schedule' => 'array',
-        'permissions' => 'array',
-        'kpis' => 'array',
+        'date_of_birth' => 'date',
+        'start_date' => 'date',
     ];
 
     public function timesheets()

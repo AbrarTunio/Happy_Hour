@@ -13,12 +13,17 @@ class TimesheetController extends Controller
      */
     public function store(Request $request)
     {
+        // The validation logic is updated to provide a better error message.
         $validated = $request->validate([
             'employee_id' => 'required|exists:teams,id',
             'date' => 'required|date',
             'clock_in' => 'required|date_format:H:i',
+            // The 'after:clock_in' rule correctly compares H:i formatted time strings on the same day.
             'clock_out' => 'required|date_format:H:i|after:clock_in',
             'notes' => 'nullable|string',
+        ], [
+            // This is the custom error message that will be sent to the frontend.
+            'clock_out.after' => 'The clock out time must be after the clock in time.'
         ]);
 
         $timesheet = Timesheet::create([
