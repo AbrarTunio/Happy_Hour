@@ -14,4 +14,7 @@ class IngredientPriceHistory extends Model
     protected $table = 'ingredient_price_history';
 
     protected $fillable = ['ingredient_id', 'price', 'log_date'];
+    protected $casts = [
+        'log_date' => 'datetime',
+    ];
 }

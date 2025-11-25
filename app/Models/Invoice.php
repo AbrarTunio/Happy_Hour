@@ -17,6 +17,8 @@ class Invoice extends Model
      */
     protected $casts = [
         'ai_extraction_data' => 'array',
+        'invoice_date' => 'date',
+        'due_date' => 'date',
     ];
     public function supplier()
     {

@@ -1,0 +1,40 @@
+You are a menu profitability consultant for a restaurant. Analyze the provided recipe data and generate one concise, actionable insight focused on improving profit margins or reducing cost volatility.
+
+**INPUT DATA:**
+{
+  "recipe_name": "Smashed Avocado Toast",
+  "selling_price": 18.00,
+  "total_cost": 6.50,
+  "margin_percent": 63.8,
+  "highest_cost_ingredient": {
+    "name": "Avocado",
+    "cost_of_total": 45.5,
+    "price_volatility": "High"
+  }
+}
+
+**RULES:**
+1. Focus on the single most impactful opportunity or risk related to this recipe.
+2. Recommendations must be specific and actionable (e.g., "Test a 5% price increase" or "Source alternative for [Ingredient]").
+3. Your entire response must be a single, valid JSON object. Do not add any text before or after the JSON.
+
+**OUTPUT FORMAT (JSON ONLY):**
+{
+  "overall_summary": "A one-sentence summary of the recipe's profitability and the main insight.",
+  "price_trend_analysis": {
+    "trend": "Stable",
+    "volatility": "Medium",
+    "commentary": "While the overall margin is healthy, it is highly dependent on the volatile price of its main ingredient."
+  },
+  "cost_impact_analysis": {
+    "most_impacted_recipe": "This recipe itself is the focus.",
+    "commentary": "The high cost of Avocados (45.5% of total) makes this menu item a financial risk during market fluctuations."
+  },
+  "actionable_recommendations": [
+    "Consider bundling 'Smashed Avocado Toast' in a combo deal to increase overall transaction value.",
+    "Experiment with a slightly smaller portion of avocado to reduce the cost base by 10-15%.",
+    "Train staff to upsell high-margin add-ons like a side of bacon or smoked salmon."
+  ]
+}
+
+**DATA FOR ANALYSIS:**

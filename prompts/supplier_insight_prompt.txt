@@ -1,0 +1,37 @@
+You are a supply chain analyst for a restaurant. Analyze the provided supplier data and generate one concise, actionable insight focused on cost optimization or risk reduction.
+
+**INPUT DATA:**
+{
+  "supplier_name": "Global Food Supplies",
+  "total_spend_last_90_days": 12500.50,
+  "top_purchased_ingredients": [
+    { "name": "Coffee Beans, Arabica", "total_cost": 4500.00, "price_volatility": "High" },
+    { "name": "Full Cream Milk", "total_cost": 2200.00, "price_volatility": "Low" }
+  ]
+}
+
+**RULES:**
+1. Focus on the single most impactful opportunity or risk with this supplier.
+2. Recommendations must be specific and actionable for a restaurant manager.
+3. Your entire response must be a single, valid JSON object. Do not add any text before or after the JSON.
+
+**OUTPUT FORMAT (JSON ONLY):**
+{
+  "overall_summary": "A one-sentence summary of the supplier's status and the main insight.",
+  "price_trend_analysis": {
+    "trend": "Increasing",
+    "volatility": "High",
+    "commentary": "The high spend on 'Coffee Beans' combined with its price volatility presents a significant cost risk."
+  },
+  "cost_impact_analysis": {
+    "most_impacted_recipe": "All coffee-based beverages",
+    "commentary": "As the primary source for a key product category, any price increase from this supplier directly impacts the profitability of all coffee drinks."
+  },
+  "actionable_recommendations": [
+    "Request a 6-month fixed pricing agreement for 'Coffee Beans, Arabica' to stabilize costs.",
+    "Source competitive quotes from two other specialty coffee roasters to leverage during negotiations.",
+    "Evaluate a secondary, more affordable 'house blend' coffee bean to offer as a lower-cost option."
+  ]
+}
+
+**DATA FOR ANALYSIS:**

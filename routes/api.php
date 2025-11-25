@@ -8,7 +8,9 @@ use App\Http\Controllers\IngredientController;
 use App\Http\Controllers\RecipeController;
 use App\Http\Controllers\TeamController;
 use App\Http\Controllers\TimesheetController;
-
+use App\Http\Controllers\AiInsightController;
+use App\Http\Controllers\KpiController;
+use App\Http\Controllers\SalesReconciliationController;
 /*
 |--------------------------------------------------------------------------
 | API Routes
@@ -50,3 +52,25 @@ Route::post('/timesheets/clock-out', [TimesheetController::class, 'clockOut']);
 Route::post('/timesheets/take-break', [TimesheetController::class, 'startBreak']);
 Route::post('/timesheets/end-break', [TimesheetController::class, 'endBreak']);
 Route::apiResource('timesheets', TimesheetController::class)->only(['store']); // For manager's manual entry
+
+// --- AI INSIGHTS ROUTES ---
+Route::put('/invoices/{invoice}/update-items', [InvoiceController::class, 'updateItems']);
+
+
+
+Route::get('/ai-insights', [AiInsightController::class, 'index']);
+Route::post('/ai-insights/generate', [AiInsightController::class, 'generateAll']);
+Route::get('/ai-insights/{insight}', [AiInsightController::class, 'show']);
+
+Route::apiResource('kpis', KpiController::class)->only(['index', 'store', 'show']);
+
+
+Route::prefix('sales-reconciliation')->group(function () {
+    Route::get('/dashboard', [SalesReconciliationController::class, 'getDashboardData']);
+    Route::get('/', [SalesReconciliationController::class, 'getForDate']);
+    Route::get('/history', [SalesReconciliationController::class, 'getHistory']);
+    Route::post('/{reconciliation}/upload', [SalesReconciliationController::class, 'uploadReceipt']);
+    Route::put('/{reconciliation}/breakdown', [SalesReconciliationController::class, 'updateBreakdown']);
+    Route::post('/{reconciliation}/confirm', [SalesReconciliationController::class, 'confirmAndClose']);
+    Route::post('/{reconciliation}/flag', [SalesReconciliationController::class, 'flagForReview']);
+});

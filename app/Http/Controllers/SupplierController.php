@@ -6,12 +6,18 @@ use App\Models\Supplier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB; // <-- Import the DB facade
+use Carbon\Carbon;
+
 
 class SupplierController extends Controller
 {
     public function index()
     {
-        return Supplier::orderBy('company_name')->get();
+        return Supplier::withCount('invoices')
+            ->withSum('invoices', 'total') // This calculates the sum of the 'total' column on the invoices table
+            ->orderBy('company_name')
+            ->get();
     }
 
     public function show($id)
@@ -38,8 +44,10 @@ class SupplierController extends Controller
 
         $supplier = Supplier::create($validated);
 
+
         return response()->json($supplier, 201);
     }
+
 
     /**
      * Handles the ABN lookup request from the frontend.

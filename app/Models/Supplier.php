@@ -46,4 +46,9 @@ class Supplier extends Model
     {
         return $this->hasMany(Invoice::class);
     }
+    public function insight()
+    {
+        // A model can have one polymorphic insight record.
+        return $this->morphOne(AiInsight::class, 'insightable');
+    }
 }

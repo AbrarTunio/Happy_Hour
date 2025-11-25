@@ -18,7 +18,6 @@ class Ingredient extends Model
     {
         return $this->belongsTo(Supplier::class, 'primary_supplier_id');
     }
-
     public function priceHistory()
     {
         return $this->hasMany(IngredientPriceHistory::class)->orderBy('log_date', 'desc');
@@ -31,6 +30,7 @@ class Ingredient extends Model
 
     public function recipes()
     {
+        // Assumes your pivot table is named 'ingredient_recipe'
         return $this->belongsToMany(Recipe::class, 'ingredient_recipe')->withPivot('quantity');
     }
 
@@ -61,4 +61,11 @@ class Ingredient extends Model
             return round((($latest - $previous) / $previous) * 100);
         });
     }
+    public function insight()
+    {
+        // A model can have one polymorphic insight record.
+        return $this->morphOne(AiInsight::class, 'insightable');
+    }
+
+
 }

@@ -15,12 +15,24 @@ class InvoiceController extends Controller
 {
     public function index()
     {
-        return Invoice::with('supplier')->orderBy('invoice_date', 'desc')->get()->map(function ($invoice) {
-            if (empty($invoice->status)) {
-                $invoice->status = 'uploaded';
-            }
-            return $invoice;
-        });
+        $invoices = Invoice::with('supplier')->orderBy('invoice_date', 'desc')->get();
+
+        $totalInvoices = $invoices->count();
+        $processedCount = $invoices->where('status', 'processed')->count();
+
+        // Calculate Match Rate, handling division by zero
+        $matchRate = $totalInvoices > 0 ? ($processedCount / $totalInvoices) * 100 : 0;
+
+        // Return a structured response with invoices and stats
+        return response()->json([
+            'invoices' => $invoices,
+            'stats' => [
+                'processing_queue' => $invoices->where('status', 'processing')->count(),
+                'needs_review' => $invoices->where('status', 'needs review')->count(),
+                'approved' => $processedCount,
+                'match_rate' => round($matchRate),
+            ]
+        ]);
     }
 
     public function show($id)
@@ -77,49 +89,49 @@ class InvoiceController extends Controller
             $imageData = base64_encode(file_get_contents($filePath));
             $mimeType = mime_content_type($filePath);
             $prompt = file_get_contents(base_path('prompts/invoice_extraction_prompt.txt'));
+
+            // Using a more robust HTTP client like Guzzle is good practice
             $client = new \GuzzleHttp\Client();
-
-            Log::info("Sending request to Gemini API for invoice {$invoice->id}");
-
             $response = $client->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$apiKey}", [
                 'json' => [
                     'contents' => [['parts' => [['text' => $prompt], ['inline_data' => ['mime_type' => $mimeType, 'data' => $imageData]]]]],
                     'generationConfig' => ['response_mime_type' => 'application/json']
                 ],
-                'timeout' => 60
+                'timeout' => 90 // Increased timeout for larger invoices
             ]);
 
             $result = json_decode($response->getBody(), true);
             if (!isset($result['candidates'][0]['content']['parts'][0]['text'])) {
-                throw new \Exception('No response from AI model');
+                throw new \Exception('No valid response from AI model.');
             }
 
             $jsonResponse = trim($result['candidates'][0]['content']['parts'][0]['text']);
-            Log::info("Raw Gemini response for invoice {$invoice->id}: " . $jsonResponse);
-
             $extractedData = json_decode($jsonResponse, true);
             if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new \Exception('AI returned an invalid data structure. JSON Error: ' . json_last_error_msg());
+                throw new \Exception('AI returned invalid JSON. Error: ' . json_last_error_msg());
             }
-
             if (!isset($extractedData['orders']) || !is_array($extractedData['orders'])) {
                 $extractedData['orders'] = [];
             }
 
+            // This method now performs the validation and sets the correct status internally
             $this->calculateAndValidateTotals($extractedData);
-            $this->updateInvoiceFromExtractedData($invoice, $extractedData);
 
-            // This method now automatically creates ingredients and adds status flags.
+            $this->updateInvoiceFromExtractedData($invoice, $extractedData);
             $ingredientsAdded = $this->processInvoiceItemsAndCreateIngredients($extractedData, $invoice);
 
             $invoice->ai_extraction_data = $extractedData;
-            $invoice->status = 'processed';
+
+            // ### MODIFIED LINE ###
+            // Use the status determined by the validation logic.
+            $invoice->status = $extractedData['status'] ?? 'needs review';
+
             $invoice->save();
 
-            Log::info("Invoice {$invoice->id} processed successfully. {$ingredientsAdded} new ingredients were created.");
+            Log::info("Invoice {$invoice->id} processed. Status: {$invoice->status}. {$ingredientsAdded} new ingredients were created.");
 
             return response()->json([
-                'message' => 'Invoice processed successfully. ' . $ingredientsAdded . ' new ingredients were automatically added.',
+                'message' => 'Invoice processed successfully. Status set to: ' . $invoice->status,
                 'invoice' => $invoice
             ]);
         } catch (\Exception $e) {
@@ -130,26 +142,47 @@ class InvoiceController extends Controller
         }
     }
 
+
+    // ### THIS ENTIRE METHOD IS UPDATED ###
     private function calculateAndValidateTotals(&$extractedData)
     {
+        // If AI found no items, it needs review.
         if (empty($extractedData['orders'])) {
             $extractedData['totals'] = ['ex_tax' => 0, 'gst' => 0, 'grand_total' => 0];
+            $extractedData['status'] = 'needs review';
             return;
         }
+
         $calculatedSubtotal = 0;
         $calculatedGST = 0;
+        $needsReview = false; // Start by assuming the invoice is correct.
+
         foreach ($extractedData['orders'] as &$item) {
             $quantity = floatval($item['qty'] ?? 1);
             $unitPrice = floatval($item['price'] ?? 0);
-            $item['total'] = isset($item['total']) ? floatval($item['total']) : ($quantity * $unitPrice);
+            $reportedTotal = isset($item['total']) ? floatval($item['total']) : ($quantity * $unitPrice);
+
+            // Calculate what the total for this line item SHOULD be.
+            $expectedTotal = round($quantity * $unitPrice, 2);
+
+            // If the AI's reported total differs from our calculation by more than 5 cents, flag for review.
+            if (abs($expectedTotal - $reportedTotal) > 0.05) {
+                $needsReview = true;
+            }
+
+            $item['total'] = $reportedTotal;
             $item['gst'] = floatval($item['gst'] ?? $item['GST'] ?? 0);
             $calculatedSubtotal += $item['total'];
             $calculatedGST += $item['gst'];
         }
+
         if (!isset($extractedData['totals'])) $extractedData['totals'] = [];
         $extractedData['totals']['ex_tax'] = floatval($extractedData['totals']['ex_tax'] ?? $calculatedSubtotal);
         $extractedData['totals']['gst'] = floatval($extractedData['totals']['gst'] ?? $calculatedGST);
         $extractedData['totals']['grand_total'] = floatval($extractedData['totals']['grand_total'] ?? ($calculatedSubtotal + $calculatedGST));
+
+        // Set the final status based on whether any discrepancy was found.
+        $extractedData['status'] = $needsReview ? 'needs review' : 'processed';
     }
 
     private function updateInvoiceFromExtractedData($invoice, $extractedData)
@@ -202,6 +235,40 @@ class InvoiceController extends Controller
         }
         unset($item);
         return $ingredientsAdded;
+    }
+    public function updateItems(Request $request, Invoice $invoice)
+    {
+        $validated = $request->validate([
+            'orders' => 'required|array',
+            'orders.*.description' => 'required|string',
+            'orders.*.price' => 'required|numeric|min:0',
+            'orders.*.total' => 'required|numeric|min:0',
+        ]);
+
+        $extractionData = $invoice->ai_extraction_data;
+        $extractionData['orders'] = $validated['orders'];
+
+        $subtotal = 0;
+        $gst = 0;
+        foreach ($extractionData['orders'] as $item) {
+            $subtotal += floatval($item['total']);
+            $gst += floatval($item['gst'] ?? $item['GST'] ?? 0);
+        }
+        $grandTotal = $subtotal + $gst;
+
+        $extractionData['totals']['ex_tax'] = $subtotal;
+        $extractionData['totals']['grand_total'] = $grandTotal;
+        $invoice->total = $grandTotal;
+
+        $invoice->status = 'processed';
+
+        $invoice->ai_extraction_data = $extractionData;
+        $invoice->save();
+
+        return response()->json([
+            'message' => 'Invoice items updated successfully.',
+            'invoice' => $invoice
+        ]);
     }
 
     public function destroy($id)

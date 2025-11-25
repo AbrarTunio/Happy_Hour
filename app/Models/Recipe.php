@@ -14,10 +14,14 @@ class Recipe extends Model
 
     public function ingredients()
     {
-        return $this->belongsToMany(Ingredient::class, 'ingredient_recipe')
-            ->withPivot('quantity');
+        // Assumes your pivot table is named 'ingredient_recipe'
+        return $this->belongsToMany(Ingredient::class, 'ingredient_recipe')->withPivot('quantity');
     }
-
+    public function insight()
+    {
+        // A model can have one polymorphic insight record.
+        return $this->morphOne(AiInsight::class, 'insightable');
+    }
     protected function cost(): Attribute
     {
         return Attribute::make(
@@ -46,4 +50,6 @@ class Recipe extends Model
             }
         );
     }
+
+
 }
