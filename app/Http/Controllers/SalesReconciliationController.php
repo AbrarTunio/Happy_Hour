@@ -8,9 +8,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
+use GuzzleHttp\Client; // Import Guzzle Client
 
 class SalesReconciliationController extends Controller
 {
+    // ... (getDashboardData & getForDate remain the same) ...
     public function getDashboardData(Request $request)
     {
         $validated = $request->validate(['branch' => 'required|string']);
@@ -38,7 +40,7 @@ class SalesReconciliationController extends Controller
 
         $reconciliation = SalesReconciliation::where('branch', $validated['branch'])
             ->where('date', $validated['date'])
-            ->whereIn('status', ['pending', 'needs_review', 'rejected']) // Include rejected to allow retry
+            ->whereIn('status', ['pending', 'needs_review', 'rejected'])
             ->latest()
             ->first();
 
@@ -53,13 +55,14 @@ class SalesReconciliationController extends Controller
         return response()->json($reconciliation);
     }
 
+    // --- FIXED UPLOAD METHOD ---
     public function uploadReceipt(Request $request, SalesReconciliation $reconciliation)
     {
         $validated = $request->validate(['receipt' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120']);
 
         $path = $request->file('receipt')->store('receipts', 'public');
 
-        // Reset Data for Fresh Start
+        // Reset Data
         $reconciliation->receipt_file_path = $path;
         $reconciliation->recipe_breakdown = null;
         $reconciliation->total_breakdown_sales = 0;
@@ -73,22 +76,43 @@ class SalesReconciliationController extends Controller
             if (!$apiKey) throw new \Exception('Gemini API key not configured.');
 
             $filePath = storage_path('app/public/' . $path);
+            if (!file_exists($filePath)) throw new \Exception('File not found.');
+
             $imageData = base64_encode(file_get_contents($filePath));
             $mimeType = mime_content_type($filePath);
             $prompt = file_get_contents(base_path('prompts/z_read_extraction_prompt.txt'));
 
-            $response = Http::timeout(60)->post("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={$apiKey}", [
-                'contents' => [['parts' => [['text' => $prompt], ['inline_data' => ['mime_type' => $mimeType, 'data' => $imageData]]]]],
-                'generationConfig' => ['response_mime_type' => 'application/json']
+            // Configure Client with SSL workaround
+            $client = new Client([
+                'verify' => false,
+                'timeout' => 120
             ]);
 
-            $result = $response->json();
+            $response = $client->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={$apiKey}",
+                [
+                    'headers' => ['Content-Type' => 'application/json'],
+                    'json' => [
+                        'contents' => [['parts' => [['text' => $prompt], ['inline_data' => ['mime_type' => $mimeType, 'data' => $imageData]]]]],
+                        'generationConfig' => ['response_mime_type' => 'application/json']
+                    ]
+                ]
+            );
+
+            $result = json_decode($response->getBody(), true);
             if (!isset($result['candidates'][0]['content']['parts'][0]['text'])) {
-                throw new \Exception('Invalid response from AI model.');
+                throw new \Exception('Invalid AI response.');
             }
 
             $jsonResponse = trim($result['candidates'][0]['content']['parts'][0]['text']);
             $jsonResponse = str_replace(['```json', '```'], '', $jsonResponse);
+
+            // Robust JSON decoding
+            $start = strpos($jsonResponse, '{');
+            $end = strrpos($jsonResponse, '}');
+            if ($start !== false && $end !== false) {
+                $jsonResponse = substr($jsonResponse, $start, $end - $start + 1);
+            }
 
             $data = json_decode($jsonResponse, true);
 
@@ -96,34 +120,34 @@ class SalesReconciliationController extends Controller
                 throw new \Exception('AI returned malformed JSON.');
             }
 
-            // --- SMART CHECK: IS IT A VALID SALES RECEIPT? ---
+            // --- VALIDATION ---
             $isValid = $data['is_valid_sales_receipt'] ?? false;
             $totalSales = floatval($data['total_sales'] ?? 0);
 
             if ($isValid === false || $totalSales <= 0) {
-                $reconciliation->status = 'rejected'; // Mark as rejected
+                $reconciliation->status = 'rejected';
                 $reconciliation->total_sales_from_receipt = 0;
                 $reconciliation->variance = 0;
                 $reconciliation->save();
 
-                // RETURN THE SPECIFIC ERROR MESSAGE REQUESTED
                 return response()->json([
-                    'message' => 'The file you have provided is not a sales receipt.',
+                    'message' => 'The file you have provided is not a valid Z-Read sales receipt.',
                     'reconciliation' => $reconciliation
                 ], 422);
             }
 
             $reconciliation->total_sales_from_receipt = $totalSales;
-            $reconciliation->variance = $totalSales; // Initial variance = total sales
+            $reconciliation->variance = $totalSales;
             $reconciliation->save();
 
             return response()->json($reconciliation);
-        } catch (\Exception $e) {
-            Log::error("Z-Read AI Extraction Failed: " . $e->getMessage());
-            return response()->json(['message' => 'AI Processing failed. Please check the file.'], 500);
+        } catch (\Throwable $e) { // Catch ALL errors
+            Log::error("Z-Read Processing Failed: " . $e->getMessage());
+            return response()->json(['message' => 'AI Processing failed: ' . $e->getMessage()], 500);
         }
     }
 
+    // ... (rest of controller remains the same) ...
     public function updateBreakdown(Request $request, SalesReconciliation $reconciliation)
     {
         $validated = $request->validate([
@@ -169,7 +193,6 @@ class SalesReconciliationController extends Controller
 
         $variance = $reconciliation->total_sales_from_receipt - $totalBreakdownSales;
 
-        // --- CHECK 2: PREVENT NEGATIVE VARIANCE ---
         if ($variance < -0.05) {
             return response()->json([
                 'message' => 'Error: Total Breakdown Sales cannot exceed Receipt Total.',
