@@ -29,11 +29,6 @@ class SalesReconciliationController extends Controller
         ]);
     }
 
-    /**
-     * Logic Change: Find an existing PENDING record for this date.
-     * If none exists (or only reconciled ones exist), CREATE A NEW ONE.
-     * This allows "Add Again" to work for the same date.
-     */
     public function getForDate(Request $request)
     {
         $validated = $request->validate([
@@ -41,15 +36,13 @@ class SalesReconciliationController extends Controller
             'date' => 'required|date'
         ]);
 
-        // Find an ACTIVE (not closed) reconciliation for this date
         $reconciliation = SalesReconciliation::where('branch', $validated['branch'])
             ->where('date', $validated['date'])
-            ->whereIn('status', ['pending', 'needs_review'])
+            ->whereIn('status', ['pending', 'needs_review', 'rejected']) // Include rejected to allow retry
             ->latest()
             ->first();
 
         if (!$reconciliation) {
-            // Create a new blank one if all previous ones are closed
             $reconciliation = SalesReconciliation::create([
                 'branch' => $validated['branch'],
                 'date' => $validated['date'],
@@ -66,8 +59,7 @@ class SalesReconciliationController extends Controller
 
         $path = $request->file('receipt')->store('receipts', 'public');
 
-        // --- CRITICAL FIX: RESET DATA ---
-        // Clear previous breakdown items so they don't reappear
+        // Reset Data for Fresh Start
         $reconciliation->receipt_file_path = $path;
         $reconciliation->recipe_breakdown = null;
         $reconciliation->total_breakdown_sales = 0;
@@ -91,21 +83,44 @@ class SalesReconciliationController extends Controller
             ]);
 
             $result = $response->json();
-            $jsonText = $result['candidates'][0]['content']['parts'][0]['text'] ?? null;
-            if (!$jsonText) throw new \Exception('AI returned an empty response.');
-
-            $data = json_decode($jsonText, true);
-
-            if (isset($data['total_sales'])) {
-                $reconciliation->total_sales_from_receipt = $data['total_sales'];
-                $reconciliation->variance = $data['total_sales']; // Reset variance
-                $reconciliation->save();
+            if (!isset($result['candidates'][0]['content']['parts'][0]['text'])) {
+                throw new \Exception('Invalid response from AI model.');
             }
+
+            $jsonResponse = trim($result['candidates'][0]['content']['parts'][0]['text']);
+            $jsonResponse = str_replace(['```json', '```'], '', $jsonResponse);
+
+            $data = json_decode($jsonResponse, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception('AI returned malformed JSON.');
+            }
+
+            // --- SMART CHECK: IS IT A VALID SALES RECEIPT? ---
+            $isValid = $data['is_valid_sales_receipt'] ?? false;
+            $totalSales = floatval($data['total_sales'] ?? 0);
+
+            if ($isValid === false || $totalSales <= 0) {
+                $reconciliation->status = 'rejected'; // Mark as rejected
+                $reconciliation->total_sales_from_receipt = 0;
+                $reconciliation->variance = 0;
+                $reconciliation->save();
+
+                // RETURN THE SPECIFIC ERROR MESSAGE REQUESTED
+                return response()->json([
+                    'message' => 'The file you have provided is not a sales receipt.',
+                    'reconciliation' => $reconciliation
+                ], 422);
+            }
+
+            $reconciliation->total_sales_from_receipt = $totalSales;
+            $reconciliation->variance = $totalSales; // Initial variance = total sales
+            $reconciliation->save();
 
             return response()->json($reconciliation);
         } catch (\Exception $e) {
             Log::error("Z-Read AI Extraction Failed: " . $e->getMessage());
-            return response()->json($reconciliation);
+            return response()->json(['message' => 'AI Processing failed. Please check the file.'], 500);
         }
     }
 
@@ -152,10 +167,21 @@ class SalesReconciliationController extends Controller
             }
         }
 
+        $variance = $reconciliation->total_sales_from_receipt - $totalBreakdownSales;
+
+        // --- CHECK 2: PREVENT NEGATIVE VARIANCE ---
+        if ($variance < -0.05) {
+            return response()->json([
+                'message' => 'Error: Total Breakdown Sales cannot exceed Receipt Total.',
+                'current_breakdown_total' => $totalBreakdownSales,
+                'receipt_total' => $reconciliation->total_sales_from_receipt
+            ], 422);
+        }
+
         $reconciliation->recipe_breakdown = $breakdown;
         $reconciliation->total_breakdown_sales = $totalBreakdownSales;
         $reconciliation->total_cogs = $totalCogs;
-        $reconciliation->variance = $reconciliation->total_sales_from_receipt - $totalBreakdownSales;
+        $reconciliation->variance = $variance;
 
         if ($reconciliation->status === 'pending') {
             $variancePercentage = $reconciliation->total_sales_from_receipt > 0
@@ -189,7 +215,7 @@ class SalesReconciliationController extends Controller
         $history = SalesReconciliation::where('branch', $validated['branch'])
             ->whereNotNull('total_sales_from_receipt')
             ->orderBy('date', 'desc')
-            ->orderBy('updated_at', 'desc') // Sort secondary by time to show distinct entries clearly
+            ->orderBy('updated_at', 'desc')
             ->take(50)
             ->get();
         return response()->json($history);

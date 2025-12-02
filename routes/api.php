@@ -31,7 +31,9 @@ Route::apiResource('ingredients', IngredientController::class)->only(['index', '
 // Invoice Routes
 Route::post('invoices/{invoice}/process-ai', [InvoiceController::class, 'processWithAI']); // <<< --- ADD THIS NEW ROUTE
 
+
 Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
+
 
 // Recipe Routes
 Route::apiResource('recipes', RecipeController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
