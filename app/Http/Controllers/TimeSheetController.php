@@ -8,7 +8,7 @@ use Carbon\Carbon;
 
 class TimeSheetController extends Controller
 {
-    // update name of controller with Timesheet small s everywhere
+    // changed sheet name
     /**
      * Store a newly created resource in storage. (For Manager's "Add Time Entry" Modal)
      */
