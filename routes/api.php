@@ -11,7 +11,7 @@ use App\Http\Controllers\TeamController;
 use App\Http\Controllers\AiInsightController;
 use App\Http\Controllers\KpiController;
 use App\Http\Controllers\SalesReconciliationController;
-use App\Http\Controllers\TimesheetController;
+use App\Http\Controllers\TimeSheetController;
 
 /*
 |--------------------------------------------------------------------------
@@ -51,16 +51,14 @@ Route::patch('/teams/{team}/status', [TeamController::class, 'updateStatus']);
 Route::post('/staff/register', [TeamController::class, 'register']); // <-- ADD THIS NEW ROUTE
 
 // Timesheet Routes
-Route::post('/timesheets/clock-in', [TimesheetController::class, 'clockIn']);
-Route::post('/timesheets/clock-out', [TimesheetController::class, 'clockOut']);
-Route::post('/timesheets/take-break', [TimesheetController::class, 'startBreak']);
-Route::post('/timesheets/end-break', [TimesheetController::class, 'endBreak']);
-Route::apiResource('timesheets', TimesheetController::class)->only(['store']); // For manager's manual entry
+Route::post('/timesheets/clock-in', [TimeSheetController::class, 'clockIn']);
+Route::post('/timesheets/clock-out', [TimeSheetController::class, 'clockOut']);
+Route::post('/timesheets/take-break', [TimeSheetController::class, 'startBreak']);
+Route::post('/timesheets/end-break', [TimeSheetController::class, 'endBreak']);
+Route::apiResource('timesheets', TimeSheetController::class)->only(['store']); // For manager's manual entry
 
 // --- AI INSIGHTS ROUTES ---
 Route::put('/invoices/{invoice}/update-items', [InvoiceController::class, 'updateItems']);
-
-
 
 Route::get('/ai-insights', [AiInsightController::class, 'index']);
 Route::post('/ai-insights/generate', [AiInsightController::class, 'generateAll']);
