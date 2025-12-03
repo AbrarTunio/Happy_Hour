@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\TimeSheet;
+use App\Models\Timesheet;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 
@@ -28,7 +28,7 @@ class TimeSheetController extends Controller
             'clock_out.after' => 'The clock out time must be after the clock in time.'
         ]);
 
-        $timesheet = TimeSheet::create([
+        $timesheet = Timesheet::create([
             'team_id' => $validated['employee_id'],
             'clock_in' => Carbon::parse($validated['date'] . ' ' . $validated['clock_in']),
             'clock_out' => Carbon::parse($validated['date'] . ' ' . $validated['clock_out']),
@@ -47,12 +47,12 @@ class TimeSheetController extends Controller
         $validated = $request->validate(['team_id' => 'required|exists:teams,id']);
 
         // Prevent clocking in if already active
-        $existing = TimeSheet::where('team_id', $validated['team_id'])->whereIn('status', ['active', 'on_break'])->first();
+        $existing = Timesheet::where('team_id', $validated['team_id'])->whereIn('status', ['active', 'on_break'])->first();
         if ($existing) {
             return response()->json(['message' => 'Already clocked in.'], 409); // 409 Conflict
         }
 
-        $sheet = TimeSheet::create([
+        $sheet = Timesheet::create([
             'team_id' => $validated['team_id'],
             'clock_in' => now(),
             'status' => 'active',
@@ -67,7 +67,7 @@ class TimeSheetController extends Controller
     public function clockOut(Request $request)
     {
         $validated = $request->validate(['team_id' => 'required|exists:teams,id']);
-        $sheet = TimeSheet::where('team_id', $validated['team_id'])->whereIn('status', ['active', 'on_break'])->latest()->firstOrFail();
+        $sheet = Timesheet::where('team_id', $validated['team_id'])->whereIn('status', ['active', 'on_break'])->latest()->firstOrFail();
 
         $sheet->update([
             'clock_out' => now(),
@@ -84,7 +84,7 @@ class TimeSheetController extends Controller
     public function startBreak(Request $request)
     {
         $validated = $request->validate(['team_id' => 'required|exists:teams,id']);
-        $sheet = TimeSheet::where('team_id', $validated['team_id'])->where('status', 'active')->latest()->firstOrFail();
+        $sheet = Timesheet::where('team_id', $validated['team_id'])->where('status', 'active')->latest()->firstOrFail();
 
         $sheet->update(['break_start' => now(), 'status' => 'on_break']);
         return response()->json($sheet);
@@ -96,7 +96,7 @@ class TimeSheetController extends Controller
     public function endBreak(Request $request)
     {
         $validated = $request->validate(['team_id' => 'required|exists:teams,id']);
-        $sheet = TimeSheet::where('team_id', $validated['team_id'])->where('status', 'on_break')->latest()->firstOrFail();
+        $sheet = Timesheet::where('team_id', $validated['team_id'])->where('status', 'on_break')->latest()->firstOrFail();
 
         $sheet->update(['break_end' => now(), 'status' => 'active']);
         return response()->json($sheet);
