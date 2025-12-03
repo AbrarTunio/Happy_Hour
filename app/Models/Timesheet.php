@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
-class TimeSheet extends Model
+class Timesheet extends Model
 {
     //
     use HasFactory;
