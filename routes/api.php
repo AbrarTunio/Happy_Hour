@@ -7,10 +7,12 @@ use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\IngredientController;
 use App\Http\Controllers\RecipeController;
 use App\Http\Controllers\TeamController;
-use App\Http\Controllers\TimesheetController;
+
 use App\Http\Controllers\AiInsightController;
 use App\Http\Controllers\KpiController;
 use App\Http\Controllers\SalesReconciliationController;
+use App\Http\Controllers\TimesheetController
+
 /*
 |--------------------------------------------------------------------------
 | API Routes
