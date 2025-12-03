@@ -166,7 +166,7 @@ class TeamController extends Controller
             'emergency_contact_name' => 'required|string|max:255',
             'emergency_contact_phone' => 'required|string|max:50',
 
-            'tax_file_number' => 'nullable|string|max:50', // Added
+            'tax_file_number' => 'nullable|string|max:50', // Fixed: Include TFN
 
             // Employment
             'position' => 'required|string|max:255',
@@ -174,24 +174,33 @@ class TeamController extends Controller
             'department' => 'required|string|max:255',
             'employment_type' => 'required|string|max:50',
             'start_date' => 'required|date',
+            'hourly_rate' => 'nullable|numeric|min:0', // Fixed: Include Hourly Rate
+
             // Security
             'staff_code' => 'required|string|min:4|max:10|unique:teams,staff_code|confirmed',
+
+            // Schedule
+            'schedule' => 'nullable|array', // Fixed: Accept Schedule
         ]);
 
-        // Default values for fields not provided by employee
+        // Default values
         $validated['status'] = 'inactive';
-        $validated['hourly_rate'] = 0.00;
+        if (!isset($validated['hourly_rate'])) {
+            $validated['hourly_rate'] = 0.00;
+        }
 
-        // Create default empty schedule structure
-        $validated['schedule'] = [
-            'monday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
-            'tuesday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
-            'wednesday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
-            'thursday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
-            'friday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
-            'saturday' => ['active' => false, 'start' => '10:00', 'end' => '16:00'],
-            'sunday' => ['active' => false, 'start' => '10:00', 'end' => '16:00'],
-        ];
+        // Default schedule if not provided
+        if (!isset($validated['schedule'])) {
+            $validated['schedule'] = [
+                'monday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+                'tuesday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+                'wednesday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+                'thursday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+                'friday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+                'saturday' => ['active' => false, 'start' => '10:00', 'end' => '16:00'],
+                'sunday' => ['active' => false, 'start' => '10:00', 'end' => '16:00'],
+            ];
+        }
 
         $team = Team::create($validated);
 
