@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\TimeSheet;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
-use App\Models\TimeSheet;
 
 
 class TimeSheetController extends Controller
 {
-    // changed sheet name
+   // changed sheet name
     /**
      * Store a newly created resource in storage. (For Manager's "Add Time Entry" Modal)
      */
@@ -100,4 +100,5 @@ class TimeSheetController extends Controller
         $sheet->update(['break_end' => now(), 'status' => 'active']);
         return response()->json($sheet);
     }
+
 }

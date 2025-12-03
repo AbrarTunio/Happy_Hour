@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class TimeSheet extends Model
 {
+    //
     use HasFactory;
 
     protected $fillable = [
@@ -30,4 +30,5 @@ class TimeSheet extends Model
     {
         return $this->belongsTo(Team::class);
     }
+
 }
