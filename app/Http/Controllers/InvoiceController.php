@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Models\Invoice;
 use App\Models\Supplier;
+use App\Models\Ingredient;
+use App\Models\IngredientPriceHistory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
 
 class InvoiceController extends Controller
 {
@@ -84,7 +87,7 @@ class InvoiceController extends Controller
             $client = new Client();
 
             $resp = $client->post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=$apiKey",
                 [
                     'json' => [
                         'contents' => [['parts' => [
@@ -141,12 +144,24 @@ class InvoiceController extends Controller
             // Smart validation RAW
             $this->performSmartValidation($data);
 
-            // Save
-            $invoice->invoice_number = $data['details']['invoice_number'];
-            $invoice->total = $data['totals']['grand_total'] ?? 0;
-            $invoice->ai_extraction_data = $data;
-            $invoice->status = $data['status'];
-            $invoice->save();
+            DB::beginTransaction();
+
+            try {
+                // 1. Save Invoice Data
+                $invoice->invoice_number = $data['details']['invoice_number'];
+                $invoice->total = $data['totals']['grand_total'] ?? 0;
+                $invoice->ai_extraction_data = $data;
+                $invoice->status = $data['status'];
+                $invoice->save();
+
+                // 2. Process Ingredients
+                $this->processIngredients($data, $invoice);
+
+                DB::commit();
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
 
             return response()->json([
                 'message' => "Invoice processed ({$data['status']})",
@@ -154,7 +169,7 @@ class InvoiceController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error("AI ERROR INVOICE {$invoice->id}: " . $e->getMessage());
-            $invoice->update(['status' => 'needs review']);
+            $invoice->update(['status' => 'needs review']); // Fallback
 
             return response()->json([
                 'message' => "AI failed: " . $e->getMessage()
@@ -162,9 +177,6 @@ class InvoiceController extends Controller
         }
     }
 
-    /**
-     * SMART RAW VALIDATION (NO ROUNDING)
-     */
     private function performSmartValidation(&$data)
     {
         $lineCorrect = true;
@@ -176,12 +188,12 @@ class InvoiceController extends Controller
             $qty = floatval($item['qty']);
             $price = floatval($item['price']);
             $printed = floatval($item['total']);
-            $expected = $qty * $price; // RAW
+            $expected = $qty * $price;
 
             $item['expected_total'] = $expected;
-            $item['calculated_correctly'] = ($printed == $expected);
+            $item['calculated_correctly'] = (abs($printed - $expected) < 0.01);
 
-            if ($printed != $expected) {
+            if (abs($printed - $expected) >= 0.01) {
                 $lineCorrect = false;
                 $discrepancies[] = "{$item['description']}: $qty × $price = $expected but shows $printed";
             }
@@ -191,12 +203,11 @@ class InvoiceController extends Controller
 
         $docGrand = floatval($data['totals']['grand_total'] ?? 0);
 
-        if ($sum != $docGrand) {
+        if (abs($sum - $docGrand) >= 0.05) {
             $grandCorrect = false;
             $discrepancies[] = "Sum of line totals: $sum but Grand Total shows $docGrand";
         }
 
-        // Store validation
         $data['calculation_validation'] = [
             'line_items_correct' => $lineCorrect,
             'grand_total_correct' => $grandCorrect,
@@ -208,6 +219,59 @@ class InvoiceController extends Controller
         $data['status'] = ($lineCorrect && $grandCorrect) ? 'processed' : 'needs review';
     }
 
+    /**
+     * Create or Update Ingredients & Price History Safely
+     */
+    private function processIngredients($data, $invoice)
+    {
+        foreach ($data['orders'] as $item) {
+            $name = trim($item['description']);
+            if (empty($name)) continue;
+
+            $price = floatval($item['price']);
+            $unit = !empty($item['unit']) ? strtolower($item['unit']) : 'unit';
+            $category = !empty($item['category']) ? $item['category'] : 'General';
+
+            // Find existing ingredient (Case Insensitive)
+            $ingredient = Ingredient::where('ingredient_name', $name)->first();
+
+            if (!$ingredient) {
+                $ingredient = Ingredient::create([
+                    'ingredient_name' => $name,
+                    'category' => $category,
+                    'unit' => $unit,
+                    'primary_supplier_id' => $invoice->supplier_id,
+                    'current_price' => $price
+                ]);
+            } else {
+                // Update current price if changed
+                if ($ingredient->current_price != $price) {
+                    $ingredient->update(['current_price' => $price]);
+                }
+            }
+
+            // Add Price History Entry
+            if ($price > 0) {
+                // Parse invoice date for log, fallback to now
+                $logDate = $invoice->invoice_date ? Carbon::parse($invoice->invoice_date) : now();
+
+                // Check if history already exists for this date/price to avoid duplicates
+                $exists = IngredientPriceHistory::where('ingredient_id', $ingredient->id)
+                    ->whereDate('log_date', $logDate->toDateString())
+                    ->where('price', $price)
+                    ->exists();
+
+                if (!$exists) {
+                    IngredientPriceHistory::create([
+                        'ingredient_id' => $ingredient->id,
+                        'price' => $price,
+                        'log_date' => $logDate
+                    ]);
+                }
+            }
+        }
+    }
+
     public function updateItems(Request $request, Invoice $invoice)
     {
         $validated = $request->validate([
@@ -217,43 +281,55 @@ class InvoiceController extends Controller
             'orders.*.qty' => 'required|numeric|min:0',
         ]);
 
-        $data = $invoice->ai_extraction_data;
-        $newOrders = [];
-        $grand = 0;
+        DB::beginTransaction();
+        try {
+            $data = $invoice->ai_extraction_data;
+            $newOrders = [];
+            $grand = 0;
 
-        foreach ($validated['orders'] as $item) {
-            $qty = floatval($item['qty']);
-            $price = floatval($item['price']);
-            $expected = $qty * $price; // RAW
+            foreach ($validated['orders'] as $item) {
+                $qty = floatval($item['qty']);
+                $price = floatval($item['price']);
+                $expected = $qty * $price;
 
-            $newOrders[] = [
-                'description' => $item['description'] ?? '',
-                'qty' => $qty,
-                'price' => $price,
-                'total' => $expected,
-                'expected_total' => $expected,
-                'calculated_correctly' => true
-            ];
+                $newOrders[] = [
+                    'description' => $item['description'] ?? '',
+                    'qty' => $qty,
+                    'price' => $price,
+                    'total' => $expected,
+                    'expected_total' => $expected,
+                    'calculated_correctly' => true
+                ];
 
-            $grand += $expected;
+                $grand += $expected;
+            }
+
+            $data['orders'] = $newOrders;
+            $data['totals']['grand_total'] = $grand;
+
+            // Validate again
+            $this->performSmartValidation($data);
+
+            $invoice->update([
+                'ai_extraction_data' => $data,
+                'total' => $grand,
+                'status' => $data['status']
+            ]);
+
+            // Update ingredients based on manual edits
+            $this->processIngredients($data, $invoice);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Invoice updated.',
+                'invoice' => $invoice
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error("Manual Update Failed Invoice #{$invoice->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Update failed: ' . $e->getMessage()], 500);
         }
-
-        $data['orders'] = $newOrders;
-        $data['totals']['grand_total'] = $grand;
-
-        // Validate again after edit
-        $this->performSmartValidation($data);
-
-        $invoice->update([
-            'ai_extraction_data' => $data,
-            'total' => $grand,
-            'status' => $data['status']
-        ]);
-
-        return response()->json([
-            'message' => 'Invoice updated.',
-            'invoice' => $invoice
-        ]);
     }
 
     public function destroy($id)
