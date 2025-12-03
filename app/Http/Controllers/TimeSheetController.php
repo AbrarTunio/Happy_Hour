@@ -47,10 +47,10 @@ class TimeSheetController extends Controller
         $validated = $request->validate(['team_id' => 'required|exists:teams,id']);
 
         // Prevent clocking in if already active
-        $existing = TimeSheet::where('team_id', $validated['team_id'])->whereIn('status', ['active', 'on_break'])->first();
-        if ($existing) {
-            return response()->json(['message' => 'Already clocked in.'], 409); // 409 Conflict
-        }
+        // $existing = TimeSheet::where('team_id', $validated['team_id'])->whereIn('status', ['active', 'on_break'])->first();
+        // if ($existing) {
+        //     return response()->json(['message' => 'Already clocked in.'], 409); // 409 Conflict
+        // }
 
         $sheet = TimeSheet::create([
             'team_id' => $validated['team_id'],
