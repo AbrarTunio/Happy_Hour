@@ -22,7 +22,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             // SupplierSeeder::class,
             // IngredientSeeder::class,
-            TeamSeeder::class,
+            UserSeeder::class,
         ]);
     }
 }

@@ -40,4 +40,5 @@ class Team extends Model
     {
         return $this->hasMany(Timesheet::class);
     }
+
 }

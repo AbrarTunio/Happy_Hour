@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Team;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class TeamController extends Controller
 {
@@ -153,6 +154,7 @@ class TeamController extends Controller
         return response()->json($timesheets);
     }
     // --- PUBLIC REGISTRATION ENDPOINT ---
+    // --- PUBLIC REGISTRATION ENDPOINT ---
     public function register(Request $request)
     {
         $validated = $request->validate([
@@ -162,29 +164,28 @@ class TeamController extends Controller
             'email' => 'required|email|max:255|unique:teams,email',
             'phone_number' => 'required|string|max:50',
             'date_of_birth' => 'required|date',
-            'home_address' => 'required|string',
+            'home_address' => 'required|string|max:100',
             'emergency_contact_name' => 'required|string|max:255',
             'emergency_contact_phone' => 'required|string|max:50',
-
-            'tax_file_number' => 'nullable|string|max:50', // Fixed: Include TFN
+            'tax_file_number' => 'nullable|string|max:50',
 
             // Employment
-            'position' => 'required|string|max:255',
-            'branch' => 'required|string|max:255',
-            'department' => 'required|string|max:255',
-            'employment_type' => 'required|string|max:50',
             'start_date' => 'required|date',
-            'hourly_rate' => 'nullable|numeric|min:0', // Fixed: Include Hourly Rate
-
-            // Security
-            'staff_code' => 'required|string|min:4|max:10|unique:teams,staff_code|confirmed',
+            'hourly_rate' => 'nullable|numeric|min:0',
 
             // Schedule
-            'schedule' => 'nullable|array', // Fixed: Accept Schedule
+            'schedule' => 'nullable|array',
         ]);
+
+        // Generate a unique random 4-digit staff code
+        do {
+            $staffCode = str_pad(random_int(1000, 9999), 4, '0', STR_PAD_LEFT);
+        } while (Team::where('staff_code', $staffCode)->exists());
 
         // Default values
         $validated['status'] = 'inactive';
+        $validated['staff_code'] = $staffCode; // Auto-generated unique staff code
+
         if (!isset($validated['hourly_rate'])) {
             $validated['hourly_rate'] = 0.00;
         }
@@ -205,7 +206,66 @@ class TeamController extends Controller
         $team = Team::create($validated);
 
         return response()->json([
-            'message' => 'Your registration has been submitted. A manager will review your details and activate your account shortly.'
+            'message' => 'Your registration has been submitted. A manager will review your details and activate your account shortly.',
+            'staff_code' => $staffCode // Return the generated staff code
         ], 201);
     }
+    /**
+     * Get schedule for a specific team member
+     * Returns the regular pattern from teams.schedule JSON field
+     */
+    public function getSchedule(Team $team, Request $request)
+    {
+        // Get the regular pattern from the team's schedule JSON field
+        $regularPattern = $team->schedule ?? $this->getDefaultSchedule();
+
+        // For now, we only have regular pattern (no week-specific overrides)
+        // Both regular and specific return the same data
+        return response()->json([
+            'regular' => $regularPattern,
+            'specific' => null // No week-specific override for now
+        ]);
+    }
+
+    /**
+     * Save schedule for a team member
+     * Updates the teams.schedule JSON field
+     */
+    public function saveSchedule(Request $request, Team $team)
+    {
+        $validated = $request->validate([
+            'week_start_date' => 'nullable|date',
+            'data' => 'required|array',
+            'data.*.active' => 'required|boolean',
+            'data.*.start' => 'required|string',
+            'data.*.end' => 'required|string',
+        ]);
+
+        // For now, we only support saving the regular pattern
+        // Ignore week_start_date and always update the team's schedule field
+        $team->update(['schedule' => $validated['data']]);
+
+        return response()->json([
+            'message' => 'Schedule updated successfully',
+            'schedule' => $team->schedule
+        ]);
+    }
+
+    /**
+     * Get default schedule structure
+     */
+    private function getDefaultSchedule()
+    {
+        return [
+            'monday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+            'tuesday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+            'wednesday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+            'thursday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+            'friday' => ['active' => false, 'start' => '09:00', 'end' => '17:00'],
+            'saturday' => ['active' => false, 'start' => '10:00', 'end' => '16:00'],
+            'sunday' => ['active' => false, 'start' => '10:00', 'end' => '16:00'],
+        ];
+    }
+
+
 }
