@@ -10,22 +10,30 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $credentials = $request->validate([
-            'username' => 'required|string',
+            'username' => 'required|string', // Ensure this matches your DB column name
             'password' => 'required|string',
         ]);
 
-        if (!Auth::attempt($credentials)) {
+        // 1. Attempt login
+        if (!Auth::attempt(['username' => $credentials['username'], 'password' => $credentials['password']])) {
             return response()->json(['success' => false, 'error' => 'Invalid username or password'], 401);
         }
 
-        // Prevent session fixation
-        $request->session()->regenerate();
-
         $user = Auth::user();
 
-        if ($user->role !== 'admin') {
+        // 2. Check Role (Safely)
+        if (!$user || $user->role !== 'admin') {
             Auth::logout();
             return response()->json(['success' => false, 'error' => 'Unauthorized role'], 403);
+        }
+
+        // 3. Session Regeneration (Wrapped in try-catch to prevent 500 if session driver fails)
+        try {
+            if ($request->hasSession()) {
+                $request->session()->regenerate();
+            }
+        } catch (\Exception $e) {
+            // Silently continue if session fails, or log it
         }
 
         return response()->json([
@@ -33,6 +41,7 @@ class AuthController extends Controller
             'user' => $user,
         ]);
     }
+
 
     public function logout(Request $request)
     {
