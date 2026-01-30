@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 
 class TimesheetController extends Controller
 {
+    // timesheet controler name modified
     /**
      * Store a newly created resource (Manager Manual Entry)
      */
