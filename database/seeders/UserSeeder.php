@@ -16,9 +16,9 @@ class UserSeeder extends Seeder
         //
         User::create([
             'name' => 'Admin User',
-            'email' => 'admin@onlymetric.com',
+            'email' => 'admin@omnimetric.com',
             'username' => 'admin',
-            'password' => bcrypt('password123'),
+            'password' => bcrypt('myonlymetric123?'),
             'role' => 'admin',
         ]);
 
