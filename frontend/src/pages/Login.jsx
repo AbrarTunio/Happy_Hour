@@ -3,6 +3,11 @@ import { useNavigate, Navigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
 
+// ✅ REQUIRED for Laravel Cloud session auth
+axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL;
+axios.defaults.withCredentials = true;
+axios.defaults.headers.common['Accept'] = 'application/json';
+axios.defaults.headers.common['Content-Type'] = 'application/json';
 
 export const AdminAuthContext = createContext();
 
@@ -21,14 +26,11 @@ export const AdminAuthProvider = ({ children }) => {
             });
 
             if (response.data.success) {
-                const { user, token } = response.data;
+                const { user} = response.data;
 
                 // Save user and token
                 localStorage.setItem('adminUser', JSON.stringify(user));
-                localStorage.setItem('adminToken', token);
 
-                // Set default header for future axios calls
-                axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
                 setAdmin(user);
                 toast.success('Login successful!');
@@ -43,16 +45,12 @@ export const AdminAuthProvider = ({ children }) => {
 
     const logout = async () => {
         try {
-            const token = localStorage.getItem('adminToken');
-            await axios.post('/api/admin/logout', {}, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+            await axios.post('/api/admin/logout');
         } catch (err) {
             console.error("Logout error", err);
         } finally {
             localStorage.removeItem('adminUser');
             localStorage.removeItem('adminToken');
-            delete axios.defaults.headers.common['Authorization'];
             setAdmin(null);
             toast.success('Logged out');
         }

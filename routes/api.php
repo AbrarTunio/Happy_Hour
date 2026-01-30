@@ -96,5 +96,8 @@ Route::prefix('roster')->group(function () {
     Route::post('/save', [RosterController::class, 'save']);   // Matches POST /api/roster/save
 });
 
-Route::post('/admin/login', [AuthController::class, 'login']);
-Route::post('/admin/logout', [AuthController::class, 'logout']);
+Route::middleware(['api', 'web'])->group(function () {
+    Route::post('/admin/login', [AuthController::class, 'login']);
+    Route::post('/admin/logout', [AuthController::class, 'logout']);
+    Route::get('/admin/check-auth', [AuthController::class, 'checkAuth']);
+});

@@ -10,6 +10,7 @@ class Timesheet extends Model
 {
     use HasFactory;
 
+
     protected $fillable = [
         'team_id',
         'clock_in',

@@ -4,46 +4,54 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use App\Models\User;
 
 class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        // 1. Validate Input
         $credentials = $request->validate([
             'username' => 'required|string',
             'password' => 'required|string',
         ]);
 
-        // 2. Attempt Login (This sets a session cookie)
-        if (Auth::attempt(['username' => $credentials['username'], 'password' => $credentials['password']])) {
-
-            $user = Auth::user();
-
-            // 3. Check Role
-            if ($user->role !== 'admin') {
-                Auth::logout();
-                return response()->json(['success' => false, 'error' => 'Unauthorized role'], 403);
-            }
-
-            // 4. Return success and user data
-            return response()->json([
-                'success' => true,
-                'user' => $user
-            ]);
+        if (!Auth::attempt($credentials)) {
+            return response()->json(['success' => false, 'error' => 'Invalid username or password'], 401);
         }
 
-        // Fail Case
+        // Prevent session fixation
+        $request->session()->regenerate();
+
+        $user = Auth::user();
+
+        if ($user->role !== 'admin') {
+            Auth::logout();
+            return response()->json(['success' => false, 'error' => 'Unauthorized role'], 403);
+        }
+
         return response()->json([
-            'success' => false,
-            'error' => 'Invalid username or password'
-        ], 401);
+            'success' => true,
+            'user' => $user,
+        ]);
     }
 
     public function logout(Request $request)
     {
         Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
         return response()->json(['success' => true]);
+    }
+
+    public function checkAuth()
+    {
+        if (!Auth::check()) {
+            return response()->json(['success' => false], 401);
+        }
+
+        return response()->json([
+            'success' => true,
+            'user' => Auth::user(),
+        ]);
     }
 }
